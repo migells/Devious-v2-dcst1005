@@ -1,0 +1,16 @@
+GivenName,MiddleName,Surname,Department,Title,Office,Company,Description,Country,City
+Ole,Magnus,Larsen,IT,IT Infrastructure Manager,Trondheim,Devious Sec,Managing IT infrastructure and cloud solutions,NO,Trondheim
+Ingrid,Marie,Østby,IT,System Administrator,Trondheim,Devious Sec,Maintaining server infrastructure and security systems,NO,Trondheim
+Astrid,Elisabeth,Haugen,HR,HR Director,Trondheim,Devious Sec,Leading HR initiatives and employee development programs,NO,Trondheim
+Erik,André,Solberg,Sales,Senior Sales Manager,Trondheim,Devious Sec,Managing enterprise client relationships,NO,Trondheim
+Kristin,Sofie,Nilsen,Sales,Sales Representative,Trondheim,Devious Sec,Handling new client acquisitions,NO,Trondheim
+Lars,Fredrik,Berntsen,Finance,Financial Controller,Trondheim,Devious Sec,Managing company financials and reporting,NO,Trondheim
+Pål,Henrik,Dahl,Consultants,Security Consultant,Trondheim,Devious Sec,Specializing in network security assessments,NO,Trondheim
+Silje,Kristine,Andersen,Consultants,Senior Security Consultant,Trondheim,Devious Sec,Leading penetration testing projects,NO,Trondheim
+Øystein,Johan,Berg,Consultants,Cloud Security Architect,Trondheim,Devious Sec,Designing secure cloud infrastructure solutions,NO,Trondheim
+Håkon,Thomas,Evensen,Consultants,IAM Consultant,Trondheim,Devious Sec,Identity and Access Management specialist,NO,Trondheim
+Marte,Cecilie,Ødegård,Consultants,Security Operations Consultant,Trondheim,Devious Sec,SOC implementation and optimization,NO,Trondheim
+Bjørn,Andreas,Hagen,Consultants,Compliance Consultant,Trondheim,Devious Sec,Regulatory compliance and risk assessment,NO,Trondheim
+Eva,Kristin,Røed,Consultants,Incident Response Consultant,Trondheim,Devious Sec,Managing security incident response procedures,NO,Trondheim
+Nils,Erik,Gjerde,Consultants,Application Security Consultant,Trondheim,Devious Sec,Securing application development lifecycle,NO,Trondheim
+Åse,Maria,Viken,Consultants,Digital Forensics Consultant,Trondheim,Devious Sec,Digital forensics and incident investigation,NO,Trondheim

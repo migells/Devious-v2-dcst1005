@@ -1,0 +1,254 @@
+# ----------------------------------------
+# Active Directory User Creation Script
+# ----------------------------------------
+
+# Function to check if a user exists based on SamAccountName
+function Test-ADUserExists {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SamAccountName
+    )
+    try {
+        $user = Get-ADUser -Identity $SamAccountName -ErrorAction Stop
+        return $true
+    }
+    catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+        return $false
+    }
+    catch {
+        Write-Error "Error checking user existence: $_"
+        return $false
+    }
+}
+
+# Function to generate a random, complex password (returns a SecureString)
+function New-RandomPassword {
+    $lowerCase = "abcdefghijklmnopqrstuvwxyz"
+    $upperCase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    $numbers = "0123456789"
+    $specialChars = "!@#$%^&*()-_=+[]{}|;:,.<>?"
+    $allChars = $lowerCase + $upperCase + $numbers + $specialChars
+
+    # Random password length between 13 and 17
+    $passwordLength = Get-Random -Minimum 13 -Maximum 18
+    $passwordChars = @()
+    
+    # Ensure at least one character from each set
+    $passwordChars += $lowerCase[(Get-Random -Maximum $lowerCase.Length)]
+    $passwordChars += $upperCase[(Get-Random -Maximum $upperCase.Length)]
+    $passwordChars += $numbers[(Get-Random -Maximum $numbers.Length)]
+    $passwordChars += $specialChars[(Get-Random -Maximum $specialChars.Length)]
+    
+    # Fill the rest of the password
+    for ($i = $passwordChars.Count; $i -lt $passwordLength; $i++) {
+        $passwordChars += $allChars[(Get-Random -Maximum $allChars.Length)]
+    }
+    
+    # Shuffle characters to remove predictable patterns
+    $password = -join ($passwordChars | Get-Random -Count $passwordChars.Count)
+    $securePassword = ConvertTo-SecureString -String $password -AsPlainText -Force
+    return $securePassword
+}
+
+# Function to generate a standardized username (returns UPN)
+function New-StandardUsername {
+    param(
+        [Parameter(Mandatory)]
+        [string]$GivenName,
+        [string]$MiddleName = '',
+        [Parameter(Mandatory)]
+        [string]$Surname,
+        [Parameter(Mandatory)]
+        [string]$Domain
+    )
+    
+    # Helper to normalize special characters
+    function Convert-SpecialCharacters {
+        param([string]$InputString)
+        $replacements = @{
+            'ø' = 'o'
+            'æ' = 'ae'
+            'å' = 'a'
+            'é' = 'e'
+            'è' = 'e'
+            'ê' = 'e'
+            'ë' = 'e'
+            'à' = 'a'
+            'á' = 'a'
+            'â' = 'a'
+            'ä' = 'a'
+            'ì' = 'i'
+            'í' = 'i'
+            'î' = 'i'
+            'ï' = 'i'
+            'ò' = 'o'
+            'ó' = 'o'
+            'ô' = 'o'
+            'ö' = 'o'
+            'ù' = 'u'
+            'ú' = 'u'
+            'û' = 'u'
+            'ü' = 'u'
+            'ý' = 'y'
+            'ÿ' = 'y'
+            'ñ' = 'n'
+        }
+        $normalizedString = $InputString.ToLower()
+        foreach ($key in $replacements.Keys) {
+            $normalizedString = $normalizedString.Replace($key, $replacements[$key])
+        }
+        return $normalizedString
+    }
+    
+    $GivenName = Convert-SpecialCharacters -InputString $GivenName.Trim()
+    $MiddleName = Convert-SpecialCharacters -InputString $MiddleName.Trim()
+    $Surname = Convert-SpecialCharacters -InputString $Surname.Trim()
+    
+    # Create username in the form: givenName.middleInitial.surname@domain
+    $middleInitial = if ($MiddleName) { ".$($MiddleName.Substring(0,1))." } else { "." }
+    $username = "$GivenName$middleInitial$Surname@$Domain"
+    $username = $username -replace '[^a-zA-Z0-9@._-]', ''
+    
+    # Ensure the part before @ is not longer than 20 characters
+    $parts = $username -split '@'
+    if ($parts[0].Length -gt 20) {
+        $parts[0] = $parts[0].Substring(0,20)
+        $username = "$($parts[0])@$($parts[1])"
+    }
+    
+    return $username
+}
+
+# Function to determine the proper OU for a given department under the base path.
+# If the departmental OU doesn't exist, it can be created if -CreateIfNotExist is specified.
+function Get-DepartmentOUPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Department,
+        [Parameter(Mandatory)]
+        [string]$BasePath,  # e.g. "OU=Devious_Users,DC=Devious,DC=sec"
+        [switch]$CreateIfNotExist
+    )
+    
+    try {
+        $departmentOU = $Department.Trim()
+        $ouPath = "OU=$departmentOU,$BasePath"
+        try {
+            $null = Get-ADOrganizationalUnit -Identity $ouPath -ErrorAction Stop
+            Write-Verbose "Found existing OU: $ouPath"
+        }
+        catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+            if ($CreateIfNotExist) {
+                New-ADOrganizationalUnit -Name $departmentOU -Path $BasePath -ErrorAction Stop
+                Write-Verbose "Created new OU: $ouPath"
+            }
+            else {
+                Write-Warning "OU does not exist: $ouPath"
+                return $BasePath
+            }
+        }
+        return $ouPath
+    }
+    catch {
+        Write-Error "Error processing OU path: $_"
+        return $BasePath
+    }
+}
+
+# Bulk User Creation function that also adds each user to the appropriate global group
+function New-BulkADUsers {
+    param(
+        [Parameter(Mandatory)]
+        [string]$CsvPath,
+        [Parameter(Mandatory)]
+        [string]$Domain,        # e.g. "devious.sec"
+        [Parameter(Mandatory)]
+        [string]$BaseOUPath,    # e.g. "OU=Devious_Users,DC=Devious,DC=sec"
+        [string]$LogPath = "user_creation_log.txt"
+    )
+    
+    $users = Import-Csv -Path $CsvPath
+    $log = @()
+    
+    foreach ($user in $users) {
+        try {
+            # Generate UPN and SamAccountName
+            $upn = New-StandardUsername -GivenName $user.GivenName -MiddleName $user.MiddleName -Surname $user.Surname -Domain $Domain
+            $samAccountName = ($upn -split '@')[0]
+            
+            if (Test-ADUserExists -SamAccountName $samAccountName) {
+                $log += "SKIP: User $samAccountName already exists"
+                continue
+            }
+            
+            # Generate a random secure password
+            $securePassword = New-RandomPassword
+            
+            # Determine the departmental OU (creates it if needed)
+            $ouPath = Get-DepartmentOUPath -Department $user.Department -BasePath $BaseOUPath -CreateIfNotExist
+            
+            # Define user properties
+            $userProperties = @{
+                SamAccountName        = $samAccountName
+                UserPrincipalName     = $upn
+                Name                  = "$($user.GivenName) $($user.Surname)"
+                GivenName             = $user.GivenName
+                Surname               = $user.Surname
+                DisplayName           = "$($user.GivenName) $($user.Surname)"
+                Department            = $user.Department
+                Title                 = $user.Title
+                Office                = $user.Office
+                AccountPassword       = $securePassword
+                Enabled               = $true
+                ChangePasswordAtLogon = $true
+                Path                  = $ouPath
+            }
+            
+            # Create the user
+            New-ADUser @userProperties
+            
+            # Determine the appropriate global group based on the department
+            $globalGroup = switch ($user.Department.ToLower()) {
+                "hr"           { "g_all_hr" }
+                "it"           { "g_all_it" }
+                "sales"        { "g_all_sales" }
+                "finance"      { "g_all_finance" }
+                "consultants"  { "g_all_consultants" }
+                default        { "" }
+            }
+            
+            # If a matching global group is found, add the user to it
+            if ($globalGroup -ne "") {
+                Add-ADGroupMember -Identity $globalGroup -Members $samAccountName -ErrorAction SilentlyContinue
+            }
+            
+            $log += "SUCCESS: Created user $samAccountName in OU $ouPath and added to group $globalGroup"
+        }
+        catch {
+            $log += "ERROR: Failed to create user $($user.GivenName) $($user.Surname). Error: $_"
+        }
+    }
+    
+    # Write log to file
+    $log | Out-File -FilePath $LogPath
+}
+
+# -----------------------------------------------------------
+# Usage Example
+# -----------------------------------------------------------
+# Prepare a CSV file (e.g., new_users.csv) with columns:
+# GivenName,MiddleName,Surname,Department,Title,Office
+# Example content:
+# John,,Doe,Finance,Finance Manager,Oslo
+# Jane,Ann,Smith,HR,HR Specialist,Oslo
+# Bob,,Brown,Sales,Sales Rep,Oslo
+# Alice,,White,IT,IT Administrator,Oslo
+# Tom,,Green,Consultants,IT Consultant,Oslo
+
+$csvPath = "02-04-Users.csv"
+$domain = "devious.sec"
+$baseOUPath = "OU=Devious_Users,DC=Devious,DC=sec"
+$logPath = "user_creation_log.txt"
+
+# Run the bulk user creation function
+New-BulkADUsers -CsvPath $csvPath -Domain $domain -BaseOUPath $baseOUPath -LogPath $logPath
